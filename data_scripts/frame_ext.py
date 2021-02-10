@@ -3,13 +3,16 @@ import cv2
 import json
 
 # Ultrasound videos reading path
-r_path = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Data_Videos_Trim\HUSD"
+# r_path = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Data_Videos_Trim\HUSD"
 
 # Elastography videos reading path
-# path = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Data_Videos_Trim\TDI"
+r_path = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Data_Videos_Trim\TDI"
 
 # Ultrasound frames writing path
-w_path = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Data_Frames_Classes\HUSD"
+# w_path = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Data_Frames_Classes\HUSD"
+
+# Elastography frames writing path
+w_path = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Data_Frames_Classes\TDI"
 
 
 def extract_frames_labels(video, count, write_path, dict):
@@ -48,7 +51,7 @@ for dirs in os.listdir(r_path):
             print(count_var)
 
 # Create json file with frame-label pairs
-json_datafile = open("labels.json", "w")
+json_datafile = open("labels_TDI.json", "w")
 json.dump(labels_dict, json_datafile, indent=2)
 json_datafile.close()
 
