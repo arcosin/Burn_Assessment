@@ -12,5 +12,3 @@ for dirs in os.listdir(frames_path):
     subset = random.sample(os.listdir(os.path.join(frames_path, dirs)), 6500)
     for file in subset:
         shutil.copyfile(os.path.join(frames_path, dirs, file), os.path.join(bal_frames_path, dirs, file))
-
-
