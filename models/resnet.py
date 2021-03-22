@@ -12,8 +12,8 @@ import copy
 
 
 def initialize_resnet(num_classes, feature_ext):
-    'Initialize ResNet101 model'
-    model = models.resnet18(pretrained=True)
+    'Initialize ResNet18 model'
+    model = models.resnet18(pretrained=False)
     if feature_ext:
         for parameter in model.parameters():
             parameter.requires_grad = False
@@ -74,7 +74,7 @@ def train_model(model, dataloader, optimizer, num_epochs):
                     loss = criterion(outputs, labels)
                     _, predictions = torch.max(outputs, 1)
 
-                    if phase == 'True':
+                    if phase == 'Train':
                         loss.backward()
                         optimizer.step()
 
@@ -125,13 +125,13 @@ def train_model(model, dataloader, optimizer, num_epochs):
 if __name__ == "__main__":
 
     # Model inputs
-    data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Burn_Dataset_Split_3\HUSD"
+    data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\Corrected\Burn_Dataset\HUSD"
     save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models"
-    num_classes = 3
-    batch_size = 64
-    num_epochs = 50
-    feature_extract = True
-    learning_rate = 0.01
+    num_classes = 2
+    batch_size = 16
+    num_epochs = 30
+    feature_extract = False
+    learning_rate = 0.001
     momentum = 0.9
 
     # Initialize model
@@ -155,11 +155,11 @@ if __name__ == "__main__":
         ]),
     }
 
-    # Create training and testing datasets
+    # Create training and validation datasets
     train_burn_dataset = datasets.ImageFolder(os.path.join(data_dir, 'Train'), transform=preprocess['Train'])
     val_burn_dataset = datasets.ImageFolder(os.path.join(data_dir, 'Val'), transform=preprocess['Val'])
 
-    # Create training and testing dataloaders
+    # Create training and validation dataloaders
     train_dataloader = DataLoader(train_burn_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     val_dataloader = DataLoader(val_burn_dataset, batch_size=batch_size, shuffle=True, num_workers=4)
     dataloader = {'Train': train_dataloader, 'Val': val_dataloader}
