@@ -39,15 +39,15 @@ class BurnDataset(Dataset):
             img_array = img_array / 255
         return img_array
 
-    # def transform(self, img, mask):
-    #     if self.train:
-    #         if random.random() > 0.5:
-    #             img = f.hflip(img)
-    #             mask = f.hflip(mask)
-    #         if random.random() > 0.5:
-    #             img = f.vflip(img)
-    #             mask = f.vflip(mask)
-    #     return img, mask
+    def transform(self, img, mask):
+        if self.train:
+            if random.random() > 0.5:
+                img = f.hflip(img)
+                mask = f.hflip(mask)
+            if random.random() > 0.5:
+                img = f.vflip(img)
+                mask = f.vflip(mask)
+        return img, mask
 
     def __getitem__(self, index):
         file_name = self.data[index].split(".")[0]
@@ -55,9 +55,9 @@ class BurnDataset(Dataset):
         mask_file = os.path.join(self.masks_dir, file_name + ".png")
         image = Image.open(input_file)
         mask = Image.open(mask_file)
-        # timage, tmask = self.transform(image, mask)
-        image = self.preprocess(image)
-        mask = np.array(mask) / 255
+        timage, tmask = self.transform(image, mask)
+        image = self.preprocess(timage)
+        mask = np.array(tmask) / 255
         im, ground_t = torch.from_numpy(image).type(torch.FloatTensor), torch.from_numpy(mask).type(torch.FloatTensor)
         return im, ground_t
 
@@ -199,63 +199,99 @@ class UNet(nn.Module):
         return logits
 
 
-def train_model(model, device, epochs, batch_size, lr, n_train, train_dataloader, val_dataloader):
+def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloader):
 
-    writer = SummaryWriter(comment=f'LR_{lr}_BS_{batch_size}')
-    global_step = 0
-    n_val = len(val_dataloader)
+    start = time.time()
 
     optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)
     criterion = nn.CrossEntropyLoss()
     model = model.to(device)
 
+    training_loss = []
+    validation_loss = []
+    training_accuracy = []
+    validation_accuracy =[]
+    best_model_weights = copy.deepcopy(model.state_dict())
+    best_acc = 0.0
+
     for epoch in range(epochs):
 
-        model.train()
+        print('\n')
+        print('Epoch {}/{}'.format(epoch+1, epochs))
+        print('-'*30)
 
-        epoch_loss = 0
+        for phase in ['Train', 'Val']:
 
-        with tqdm(total=n_train, desc=f'Epoch {epoch + 1}/{epochs}', unit='img') as pbar:
-            for images, masks in train_dataloader:
+            if phase == 'Train':
+
+                model.train()
+
+            else:
+
+                model.eval()
+
+            running_loss = 0.0
+            running_corrects = 0.0
+
+            for images, masks in dataloader[phase]:
                 images = images.to(device, dtype=torch.float32)
                 masks = masks.to(device, dtype=torch.long)
-                predictions = model(images)
-                loss = criterion(predictions, masks)
-                epoch_loss += loss.item()
-
-                pbar.set_postfix(**{'Loss (batch)': loss.item()})
-
                 optimizer.zero_grad()
-                loss.backward()
-                nn.utils.clip_grad_value_(model.parameters(), 0.1)
-                optimizer.step()
 
-                pbar.update(images.shape[0])
-                global_step += 1
+                with torch.set_grad_enabled(phase == 'Train'):
+                    predictions = model(images)
+                    _, preds = torch.max(predictions, 1)
+                    loss = criterion(predictions, masks)
 
-                if global_step % (n_train // (10 * batch_size)) == 0:
-                    model.eval()
-                    val_run_loss = 0
-                    with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as val_pbar:
-                        for val_images, val_masks in val_dataloader:
-                            val_images = val_images.to(device, dtype=torch.float32)
-                            val_masks = val_masks.to(device, dtype=torch.long)
+                    if phase == 'Train':
+                        loss.backward()
+                        nn.utils.clip_grad_value_(model.parameters(), 0.1)
+                        optimizer.step()
 
-                            with torch.no_grad():
-                                val_predictions = model(val_images)
+                running_loss += loss.item() * images.size(0)
+                running_corrects += torch.sum(preds == masks.data) / (256**2)
+                # running_acc += ((torch.argmax(predictions, dim=1) == masks).detach().cpu().numpy()).sum()
+                # batch_acc = batch_acc.sum() / batch_acc.size
+                # running_acc += batch_acc * images.size(0)
 
-                            val_run_loss += criterion(val_predictions, val_masks).item()
-                            val_pbar.update()
+            epoch_loss = running_loss / len(dataloader[phase].dataset)
+            epoch_acc = running_corrects / len(dataloader[phase].dataset)
+            scheduler.step(epoch_loss)
 
-                    model.train()
-                    val_loss = val_run_loss / n_val
-                    scheduler.step(val_loss)
-                    writer.add_scalar('learning_rate', optimizer.param_groups[0]['lr'], global_step)
-                    writer.add_scalar('Loss/validation', val_loss, global_step)
-                    writer.add_images('images', images, global_step)
+            print('{} Loss: {:.4f}  Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
 
-    writer.close()
+            if phase == 'Train':
+                training_loss.append(epoch_loss)
+                training_accuracy.append(epoch_acc)
+            else:
+                validation_loss.append(epoch_loss)
+                validation_accuracy.append(epoch_acc)
+                if epoch_acc > best_acc:
+                    best_acc = epoch_acc
+                    best_model_weights = copy.deepcopy(model.state_dict())
+
+
+    train_time = time.time() - start
+    print('Training complete in {:.0f}m {:.0f}'.format(train_time // 60, train_time % 60))
+    print('Best validation accuracy: {:.4f}'.format(best_acc))
+
+    plt.subplot(1, 2, 1)
+    plt.plot(list(range(epochs)), training_loss, color='skyblue', label='Train')
+    plt.plot(list(range(epochs)), validation_loss, color='orange', label='Val')
+    plt.legend()
+    plt.title('Loss')
+    plt.xlabel('Epoch')
+    plt.subplot(1, 2, 2)
+    plt.plot(list(range(epochs)), training_accuracy, color='skyblue', label='Train')
+    plt.plot(list(range(epochs)), validation_accuracy, color='orange', label='Val')
+    plt.legend()
+    plt.title('Accuracy')
+    plt.xlabel('Epoch')
+    plt.show()
+
+    model.load_state_dict(best_model_weights)
+
     return model
 
 
@@ -264,12 +300,13 @@ if __name__ == "__main__":
     # Paths
     data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Dataset"
     labels_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Masks_Greyscale"
+    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation"
 
     # Model inputs
     batch_size = 4
     device = torch.device("cuda:0")
     learning_rate = 0.001
-    n_epochs = 2
+    n_epochs = 1
     n_classes = 3
     n_channels = 3
 
@@ -280,11 +317,14 @@ if __name__ == "__main__":
     # Create training and validation dataloaders
     training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, drop_last=True)
+    dataloader = {'Train': training_dataloader, 'Val': val_dataloader}
 
     # Initialize model
     model = UNet(n_channels, n_classes)
 
     # Training and validation
     segmentation_model = train_model(model, device, n_epochs, batch_size, learning_rate, len(training_dataset),
-                                     training_dataloader, val_dataloader)
+                                     len(val_dataset), dataloader)
 
+    # Save model
+    torch.save(segmentation_model.state_dict(), os.path.join(save_dir, "UNet_std.pth"))
