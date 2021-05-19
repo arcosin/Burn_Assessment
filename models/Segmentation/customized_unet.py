@@ -199,8 +199,12 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
 
     start = time.time()
 
-    optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=2)
+    # optimizer = optim.RMSprop(model.parameters(), lr=lr, weight_decay=1e-8, momentum=0.9)
+    optimizer = optim.Adam(model.parameters(), lr=lr)
+    # optimizer = optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+    # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10)
+    # scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda epoch: 0.95 ** epoch)
     criterion = nn.CrossEntropyLoss()
     model = model.to(device)
 
@@ -215,7 +219,9 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
     for epoch in range(epochs):
 
         print('Epoch {}/{}'.format(epoch+1, epochs))
+        printing_list.append('Epoch {}/{}'.format(epoch+1, epochs))
         print('-'*30)
+        printing_list.append('-'*30)
 
         for phase in ['Train', 'Val']:
 
@@ -255,7 +261,8 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
                     running_loss += loss.item() * images.size(0)
                     running_corrects += torch.sum(predictions == masks.data) / (256 ** 2)
 
-                scheduler.step(running_loss / len(dataloader[phase].dataset))
+                # scheduler.step(running_loss / len(dataloader[phase].dataset))
+                scheduler.step()
 
             epoch_loss = running_loss / len(dataloader[phase].dataset)
             epoch_acc = (running_corrects / len(dataloader[phase].dataset)).cpu().numpy()
@@ -303,13 +310,13 @@ if __name__ == "__main__":
     # Paths
     data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Dataset"
     labels_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Masks_Greyscale"
-    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation\Results_Train_6"
+    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation\Results_Train_10"
 
     # Model inputs
     batch_size = 4
     device = torch.device("cuda:0")
     learning_rate = 0.001
-    n_epochs = 50
+    n_epochs = 200
     n_classes = 3
     n_channels = 3
 
@@ -345,5 +352,6 @@ if __name__ == "__main__":
     file3 = open(os.path.join(save_dir, "print.txt"), "w")
     for lines in printing_list:
         file3.write(lines)
+        file3.write('\n')
     file3.close()
 
