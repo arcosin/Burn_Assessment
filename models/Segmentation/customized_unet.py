@@ -1,20 +1,16 @@
 import os
 import torch
-import torchvision
 from torch.utils.data import Dataset, DataLoader
-from torch.utils.tensorboard import SummaryWriter
 import torch.nn as nn
 import torch.optim as optim
-from torchsummary import summary
-from torchvision import datasets, models, transforms
 import torchvision.transforms.functional as f
-from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
 import time
 import copy
 from PIL import Image
 import random
+import json
 
 
 class BurnDataset(Dataset):
@@ -211,55 +207,61 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
     training_loss = []
     validation_loss = []
     training_accuracy = []
-    validation_accuracy =[]
+    validation_accuracy = []
+    printing_list = []
     best_model_weights = copy.deepcopy(model.state_dict())
     best_acc = 0.0
 
     for epoch in range(epochs):
 
-        print('\n')
         print('Epoch {}/{}'.format(epoch+1, epochs))
         print('-'*30)
 
         for phase in ['Train', 'Val']:
 
+            running_loss = 0.0
+            running_corrects = 0.0
+
             if phase == 'Train':
 
                 model.train()
+
+                for images, masks in dataloader[phase]:
+                    images = images.to(device, dtype=torch.float32)
+                    masks = masks.to(device, dtype=torch.long)
+                    optimizer.zero_grad()
+                    outputs = model(images)
+                    _, predictions = torch.max(outputs, 1)
+                    loss = criterion(outputs, masks)
+                    loss.backward()
+                    nn.utils.clip_grad_value_(model.parameters(), 0.1)
+                    optimizer.step()
+                    running_loss += loss.item() * images.size(0)
+                    running_corrects += torch.sum(predictions == masks.data) / (256 ** 2)
 
             else:
 
                 model.eval()
 
-            running_loss = 0.0
-            running_corrects = 0.0
+                for images, masks in dataloader[phase]:
+                    images = images.to(device, dtype=torch.float32)
+                    masks = masks.to(device, dtype=torch.long)
+                    optimizer.zero_grad()
 
-            for images, masks in dataloader[phase]:
-                images = images.to(device, dtype=torch.float32)
-                masks = masks.to(device, dtype=torch.long)
-                optimizer.zero_grad()
+                    with torch.no_grad():
+                        outputs = model(images)
+                        _, predictions = torch.max(outputs, 1)
+                        loss = criterion(outputs, masks)
+                    running_loss += loss.item() * images.size(0)
+                    running_corrects += torch.sum(predictions == masks.data) / (256 ** 2)
 
-                with torch.set_grad_enabled(phase == 'Train'):
-                    predictions = model(images)
-                    _, preds = torch.max(predictions, 1)
-                    loss = criterion(predictions, masks)
-
-                    if phase == 'Train':
-                        loss.backward()
-                        nn.utils.clip_grad_value_(model.parameters(), 0.1)
-                        optimizer.step()
-
-                running_loss += loss.item() * images.size(0)
-                running_corrects += torch.sum(preds == masks.data) / (256**2)
-                # running_acc += ((torch.argmax(predictions, dim=1) == masks).detach().cpu().numpy()).sum()
-                # batch_acc = batch_acc.sum() / batch_acc.size
-                # running_acc += batch_acc * images.size(0)
+                scheduler.step(running_loss / len(dataloader[phase].dataset))
 
             epoch_loss = running_loss / len(dataloader[phase].dataset)
-            epoch_acc = running_corrects / len(dataloader[phase].dataset)
-            scheduler.step(epoch_loss)
+            epoch_acc = (running_corrects / len(dataloader[phase].dataset)).cpu().numpy()
 
             print('{} Loss: {:.4f}  Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
+            printing_list.append('{} Loss: {:.4f}  Acc: {:.4f}'.format(phase, epoch_loss, epoch_acc))
 
             if phase == 'Train':
                 training_loss.append(epoch_loss)
@@ -271,10 +273,11 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
                     best_acc = epoch_acc
                     best_model_weights = copy.deepcopy(model.state_dict())
 
-
     train_time = time.time() - start
     print('Training complete in {:.0f}m {:.0f}'.format(train_time // 60, train_time % 60))
+    printing_list.append('Training complete in {:.0f}m {:.0f}'.format(train_time // 60, train_time % 60))
     print('Best validation accuracy: {:.4f}'.format(best_acc))
+    printing_list.append('Best validation accuracy: {:.4f}'.format(best_acc))
 
     plt.subplot(1, 2, 1)
     plt.plot(list(range(epochs)), training_loss, color='skyblue', label='Train')
@@ -292,7 +295,7 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
 
     model.load_state_dict(best_model_weights)
 
-    return model
+    return model, training_loss, training_accuracy, validation_loss, validation_accuracy, printing_list
 
 
 if __name__ == "__main__":
@@ -300,19 +303,19 @@ if __name__ == "__main__":
     # Paths
     data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Dataset"
     labels_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Masks_Greyscale"
-    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation"
+    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation\Results_Train_6"
 
     # Model inputs
     batch_size = 4
     device = torch.device("cuda:0")
     learning_rate = 0.001
-    n_epochs = 1
+    n_epochs = 50
     n_classes = 3
     n_channels = 3
 
     # Create training and validation datasets
-    training_dataset = BurnDataset(os.path.join(data_dir, "Train"), os.path.join(labels_dir, "Train"))
-    val_dataset = BurnDataset(os.path.join(data_dir, "Val"), os.path.join(labels_dir, "Val"))
+    training_dataset = BurnDataset(os.path.join(data_dir, "Train"), os.path.join(labels_dir, "Train"), train=True)
+    val_dataset = BurnDataset(os.path.join(data_dir, "Val"), os.path.join(labels_dir, "Val"), train=False)
 
     # Create training and validation dataloaders
     training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
@@ -323,8 +326,24 @@ if __name__ == "__main__":
     model = UNet(n_channels, n_classes)
 
     # Training and validation
-    segmentation_model = train_model(model, device, n_epochs, batch_size, learning_rate, len(training_dataset),
-                                     len(val_dataset), dataloader)
+    segmentation_model, training_loss, training_accuracy, validation_loss, validation_accuracy, printing_list = train_model(model,
+                                                device, n_epochs, batch_size, learning_rate, len(training_dataset),
+                                                len(val_dataset), dataloader)
 
     # Save model
     torch.save(segmentation_model.state_dict(), os.path.join(save_dir, "UNet_std.pth"))
+    summary_model = {'Training Loss': list(map(str, training_loss)), 'Training Accuracy': list(map(str, training_accuracy)),
+                     'Validation Loss': list(map(str, validation_loss)), 'Validation Accuracy': list(map(str, validation_accuracy))}
+    json = json.dumps(summary_model)
+    file1 = open(os.path.join(save_dir, "summary.txt"), "w")
+    file1.write(str(summary_model))
+    file1.close()
+    file2 = open(os.path.join(save_dir, "summary.json"), "w")
+    file2.write(json)
+    file2.close()
+
+    file3 = open(os.path.join(save_dir, "print.txt"), "w")
+    for lines in printing_list:
+        file3.write(lines)
+    file3.close()
+
