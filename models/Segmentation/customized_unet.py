@@ -1,6 +1,6 @@
 import os
 import torch
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, ConcatDataset
 import torch.nn as nn
 import torch.optim as optim
 import torchvision.transforms.functional as f
@@ -19,11 +19,12 @@ class BurnDataset(Dataset):
     Class to create our customized dataset
     """
 
-    def __init__(self, inputs_dir, masks_dir, train=True):
+    def __init__(self, inputs_dir, masks_dir, num_classes, train=True):
         self.inputs_dir = inputs_dir
         self.masks_dir = masks_dir
         self.data = os.listdir(self.inputs_dir)
         self.train = train
+        self.num_classes = num_classes
 
     def __len__(self):
         return len(self.data)
@@ -53,8 +54,12 @@ class BurnDataset(Dataset):
         mask = Image.open(mask_file)
         timage, tmask = self.transform(image, mask)
         image = self.preprocess(timage)
-        mask = np.array(tmask) / 255
-        im, ground_t = torch.from_numpy(image).type(torch.FloatTensor), torch.from_numpy(mask).type(torch.FloatTensor)
+        mask = np.array(tmask)
+        target = torch.zeros(256, 256)
+        target[mask == 0] = 0
+        target[mask == 127] = 1
+        target[mask == 255] = 2
+        im, ground_t = torch.from_numpy(image).type(torch.FloatTensor), target
         return im, ground_t
 
 
@@ -232,34 +237,34 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
 
                 model.train()
 
-                for images, masks in dataloader[phase]:
+                for images, targets in dataloader[phase]:
                     images = images.to(device, dtype=torch.float32)
-                    masks = masks.to(device, dtype=torch.long)
+                    targets = targets.to(device, dtype=torch.long)
                     optimizer.zero_grad()
                     outputs = model(images)
                     _, predictions = torch.max(outputs, 1)
-                    loss = criterion(outputs, masks)
+                    loss = criterion(outputs, targets)
                     loss.backward()
                     nn.utils.clip_grad_value_(model.parameters(), 0.1)
                     optimizer.step()
                     running_loss += loss.item() * images.size(0)
-                    running_corrects += torch.sum(predictions == masks.data) / (256 ** 2)
+                    running_corrects += torch.sum(predictions == targets.data) / (256 ** 2)
 
             else:
 
                 model.eval()
 
-                for images, masks in dataloader[phase]:
+                for images, targets in dataloader[phase]:
                     images = images.to(device, dtype=torch.float32)
-                    masks = masks.to(device, dtype=torch.long)
+                    targets = targets.to(device, dtype=torch.long)
                     optimizer.zero_grad()
 
                     with torch.no_grad():
                         outputs = model(images)
                         _, predictions = torch.max(outputs, 1)
-                        loss = criterion(outputs, masks)
+                        loss = criterion(outputs, targets)
                     running_loss += loss.item() * images.size(0)
-                    running_corrects += torch.sum(predictions == masks.data) / (256 ** 2)
+                    running_corrects += torch.sum(predictions == targets.data) / (256 ** 2)
 
                 # scheduler.step(running_loss / len(dataloader[phase].dataset))
                 scheduler.step()
@@ -310,7 +315,7 @@ if __name__ == "__main__":
     # Paths
     data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Dataset"
     labels_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Masks_Greyscale"
-    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation\Results_Train_10"
+    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation\Results_Train_11"
 
     # Model inputs
     batch_size = 4
@@ -321,8 +326,8 @@ if __name__ == "__main__":
     n_channels = 3
 
     # Create training and validation datasets
-    training_dataset = BurnDataset(os.path.join(data_dir, "Train"), os.path.join(labels_dir, "Train"), train=True)
-    val_dataset = BurnDataset(os.path.join(data_dir, "Val"), os.path.join(labels_dir, "Val"), train=False)
+    training_dataset = BurnDataset(os.path.join(data_dir, "Train"), os.path.join(labels_dir, "Train"), n_classes, train=True)
+    val_dataset = BurnDataset(os.path.join(data_dir, "Val"), os.path.join(labels_dir, "Val"), n_classes, train=False)
 
     # Create training and validation dataloaders
     training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
