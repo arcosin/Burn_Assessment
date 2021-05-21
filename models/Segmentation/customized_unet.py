@@ -1,3 +1,5 @@
+# code based on https://github.com/milesial/Pytorch-UNet
+
 import os
 import torch
 from torch.utils.data import Dataset, DataLoader, ConcatDataset
@@ -9,7 +11,6 @@ import matplotlib.pyplot as plt
 import time
 import copy
 from PIL import Image
-import random
 import json
 
 
@@ -29,36 +30,20 @@ class BurnDataset(Dataset):
     def __len__(self):
         return len(self.data)
 
-    def preprocess(self, img):
-        img_array = np.array(img)
-        img_array = img_array.transpose((2, 0, 1))
-        if img_array.max() > 1:
-            img_array = img_array / 255
-        return img_array
-
-    def transform(self, img, mask):
-        if self.train:
-            if random.random() > 0.5:
-                img = f.hflip(img)
-                mask = f.hflip(mask)
-            if random.random() > 0.5:
-                img = f.vflip(img)
-                mask = f.vflip(mask)
-        return img, mask
-
     def __getitem__(self, index):
         file_name = self.data[index].split(".")[0]
         input_file = os.path.join(self.inputs_dir, file_name + ".png")
         mask_file = os.path.join(self.masks_dir, file_name + ".png")
-        image = Image.open(input_file)
+        image = Image.open(input_file)  # RGB
         mask = Image.open(mask_file)
-        timage, tmask = self.transform(image, mask)
-        image = self.preprocess(timage)
-        mask = np.array(tmask)
+        image = np.array(image)
+        image = image.transpose(2, 0, 1) / 255
+        mask = np.array(mask)
         target = torch.zeros(256, 256)
         target[mask == 0] = 0
         target[mask == 127] = 1
         target[mask == 255] = 2
+
         im, ground_t = torch.from_numpy(image).type(torch.FloatTensor), target
         return im, ground_t
 
@@ -313,9 +298,9 @@ def train_model(model, device, epochs, batch_size, lr, n_train, n_val, dataloade
 if __name__ == "__main__":
 
     # Paths
-    data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Dataset"
-    labels_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Masks_Greyscale"
-    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation\Results_Train_11"
+    data_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Dataset_Augmented"
+    labels_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Thesis_Data\RGB\Masks_Greyscale_Augmented"
+    save_dir = r"F:\Users\user\Desktop\PURDUE\Research_Thesis\Models\Segmentation\Results_Train_12"
 
     # Model inputs
     batch_size = 4
@@ -330,8 +315,8 @@ if __name__ == "__main__":
     val_dataset = BurnDataset(os.path.join(data_dir, "Val"), os.path.join(labels_dir, "Val"), n_classes, train=False)
 
     # Create training and validation dataloaders
-    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, num_workers=8, pin_memory=True)
-    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=8, pin_memory=True, drop_last=True)
+    training_dataloader = DataLoader(training_dataset, batch_size=batch_size, shuffle=True, num_workers=4, pin_memory=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=4, pin_memory=True, drop_last=True)
     dataloader = {'Train': training_dataloader, 'Val': val_dataloader}
 
     # Initialize model
